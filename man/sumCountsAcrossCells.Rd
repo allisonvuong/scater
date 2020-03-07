@@ -7,7 +7,11 @@
 \alias{sumCountsAcrossCells,SummarizedExperiment-method}
 \alias{aggregateAcrossCells,SummarizedExperiment-method}
 \alias{aggregateAcrossCells,SingleCellExperiment-method}
+<<<<<<< HEAD
 \title{Sum or average counts across groups of cells}
+=======
+\title{Aggregate expression values across groups of cells}
+>>>>>>> upstream/master
 \usage{
 sumCountsAcrossCells(x, ...)
 
@@ -18,8 +22,8 @@ aggregateAcrossCells(x, ...)
   ids,
   subset_row = NULL,
   subset_col = NULL,
-  average = FALSE,
   store_number = "ncells",
+  average = FALSE,
   BPPARAM = SerialParam()
 )
 
@@ -29,6 +33,8 @@ aggregateAcrossCells(x, ...)
   x,
   ids,
   ...,
+  subset_row = NULL,
+  subset_col = NULL,
   store_number = "ncells",
   coldata_merge = NULL,
   use_exprs_values = "counts"
@@ -39,17 +45,22 @@ aggregateAcrossCells(x, ...)
   ids,
   ...,
   subset_row = NULL,
+  subset_col = NULL,
   coldata_merge = NULL,
   store_number = "ncells",
   use_exprs_values = "counts",
-  use_altexps = TRUE
+  use_altexps = TRUE,
+  use_dimred = TRUE
 )
 }
 \arguments{
-\item{x}{For \code{sumCountsAcrossCells}, a numeric matrix of counts containing features in rows and cells in columns.
-Alternatively, a \linkS4class{SummarizedExperiment} object containing such a count matrix.
+\item{x}{For \code{sumCountsAcrossCells}, a numeric matrix of expression values (usually counts)
+containing features in rows and cells in columns.
+Alternatively, a \linkS4class{SummarizedExperiment} object containing such a matrix.
 
-For \code{aggregateAcrossCells}, a \linkS4class{SingleCellExperiment} or SummarizedExperiment containing a count matrix.}
+For \code{aggregateAcrossCells}, a \linkS4class{SingleCellExperiment} or SummarizedExperiment 
+containing one or more matrices of expression values to be aggregated,
+possibly along with \code{\link{colData}}, \code{\link{reducedDims}} and \code{\link{altExps}} elements.}
 
 \item{...}{For the generics, further arguments to be passed to specific methods.
 
@@ -70,11 +81,10 @@ where aggregation is always performed for all features (or not at all, depending
 \item{subset_col}{An integer, logical or character vector specifying the cells to use.
 Defaults to all cells with non-\code{NA} entries of \code{ids}.}
 
-\item{average}{Logical scalar indicating whether the average should be computed instead of the sum.}
+\item{store_number}{String specifying the field of the output \code{\link{colData}} to store the number of cells in each group.
+If \code{NULL}, nothing is stored.}
 
-\item{store_number}{String specifying the field of the output \code{\link{colData}} 
-in which to store the number of cells in each group.
-Only used if \code{ids} is a DataFrame, and if \code{store_number=NULL}, this information is not stored.}
+\item{average}{Logical scalar indicating whether the average should be computed instead of the sum.}
 
 \item{BPPARAM}{A \linkS4class{BiocParallelParam} object specifying whether summation should be parallelized.}
 
@@ -82,62 +92,110 @@ Only used if \code{ids} is a DataFrame, and if \code{store_number=NULL}, this in
 (or any other expression quantity that can be meaningfully summed).}
 
 \item{coldata_merge}{A named list of functions specifying how each column metadata field should be aggregated.
+<<<<<<< HEAD
 For any unspecified field, metadata is retained for the first instance of a cell from each group in \code{ids}.
 If \code{NULL}, only fields with unique entries for each group will be retained.}
+=======
+Each function should be named according to the name of the column in \code{\link{colData}} to which it applies.
+Alternatively, a single function can be supplied, see below for more details.}
+>>>>>>> upstream/master
 
 \item{use_exprs_values}{A character or integer vector specifying the assay(s) of \code{x} containing count matrices.}
 
 \item{use_altexps}{Logical scalar indicating whether aggregation should be performed for alternative experiments in \code{x}.
+Alternatively, a character or integer vector specifying the alternative experiments to be aggregated.}
 
-Alternatively, a character vector specifying the names of the alternative experiments to be aggregated.}
+\item{use_dimred}{Logical scalar indicating whether aggregation should be performed for dimensionality reduction results in \code{x}.
+Alternatively, a character or integer vector specifying the dimensionality reduction results to be aggregated.}
 }
 \value{
-For \code{sumCountsAcrossCells} with a factor \code{ids}, a count matrix is returned with one column per level of \code{ids}.
-Each entry contains the sum of counts for all cells in a given group (column) for a given feature (row).
-Columns are ordered by \code{levels(ids)}.
-
-For \code{sumCountsAcrossCells} with a DataFrame \code{ids}, a SummarizedExperiment is returned containing a similar count matrix in the first assay.
-Each column corresponds to a unique combination of levels in \code{ids} and contains the sum of counts for all cells with that combination.
-The identities of the levels for each column are reported in the \code{\link{colData}}.
+For \code{sumCountsAcrossCells}, a SummarizedExperiment is returned with one column per level of \code{ids}.
+Each entry of the assay contains the sum or average across all cells in a given group (column) for a given feature (row).
+Columns are ordered by \code{levels(ids)} and the number of cells per level is reported in the \code{"ncells"} column metadata.
+For DataFrame \code{ids}, each column corresponds to a unique combination of levels (recorded in the \code{\link{colData}}).
 
 For \code{aggregateAcrossCells}, a SummarizedExperiment of the same class as \code{x} is returned,
-containing summed matrices generated by \code{sumCountsAcrossCell} on all assays specified by \code{use_exprs_values}.
-By default, column metadata is retained for the first instance of a cell from each group in \code{ids},
-but this behavior can be customized by supplying appropriate functions to \code{coldata_merge}.
-If \code{ids} is a DataFrame, the combination of levels corresponding to each column is also reported in the column metadata.
+containing summed/averaged matrices generated by \code{sumCountsAcrossCell} on all assays specified in \code{use_exprs_values}.
+Column metadata and other available metadata (e.g., reduced dimensions) are also aggregated, see below.
 }
 \description{
+<<<<<<< HEAD
 Sum or average expression values (by default, counts) and aggregate the colData 
 for each group of cells and for each feature;
+=======
+Sum counts or average expression values for each feature across groups of cells.
+Also aggregate values in the \code{\link{colData}} and other metadata within each group.
+>>>>>>> upstream/master
 }
 \details{
-This function provides a convenient method for aggregating counts across multiple columns for each feature.
-A typical application would be to sum counts across all cells in each cluster to obtain \dQuote{pseudo-bulk} samples for further analysis.
+These functions provide a convenient method for summing or averaging expression values across multiple columns for each feature.
+A typical application would be to sum counts across all cells in each cluster to obtain \dQuote{pseudo-bulk} samples for further analyses, e.g., differential expression analyses between conditions.
 
-The behaviour of this function is equivalent to that of \code{\link{colsum}}.
+The behaviour of \code{sumCountsAcrossCells} is equivalent to that of \code{\link{colsum}}.
 However, this function can operate on any matrix representation in \code{object};
 can do so in a parallelized manner for large matrices without resorting to block processing;
 and can natively support combinations of multiple factors in \code{ids}.
 
 Any \code{NA} values in \code{ids} are implicitly ignored and will not be considered during summation.
-This may be useful, e.g., to remove undesirable cells by setting their entries in \code{ids} to \code{NA}.
+This may be useful for removing undesirable cells by setting their entries in \code{ids} to \code{NA}.
 Alternatively, we can explicitly select the cells of interest with \code{subset_col}.
 
 Setting \code{average=TRUE} will compute the average in each set rather than the sum.
 This is particularly useful if \code{x} contains expression values that have already been normalized in some manner,
 as computing the average avoids another round of normalization to account for differences in the size of each set.
+
+Note that, prior to version 1.16.0, \code{sumCountsAcrossCells} would return a raw matrix.
+This has now been wrapped in a \linkS4class{SummarizedExperiment} for consistency and to include per-group statistics.
 }
+\section{Aggregation of additional metadata}{
+
+The \code{aggregateAcrossCells} sums the assay values in \code{x} using \code{sumCountsAcrossCells}
+while also aggregating metadata across cells in a sensible manner.
+This makes it useful for obtaining an aggregated \linkS4class{SummarizedExperiment} during an analysis session;
+in contrast, \code{sumCountsAcrossCells} is more lightweight and is better for use inside other functions.
+
+Aggregation of the \code{\link{colData}} is controlled using functions in \code{coldata_merge}.
+This can either be:
+\itemize{
+\item A function that takes a subset of entries for any given column metadata field and returns a single value.
+This can be set to, e.g., \code{\link{sum}} or \code{\link{median}} for numeric covariates,
+or a function that takes the most abundant level for categorical factors.
+\item A named list of such functions, where each function is applied to the column metadata field after which it is named.
+Any field that does not have an entry in \code{coldata_merge} is \dQuote{unspecified} and handled as described below.
+A list element can also be set to \code{FALSE}, in which case no aggregation is performed for the corresponding field.
+\item \code{NULL}, in which case all fields are considered to be unspecified.
+\item \code{FALSE}, in which case no aggregation of column metadata is performed.
+}
+For any unspecified field, we check if all cells of a group have the same value.
+If so, that value is reported, otherwise a \code{NA} is reported for the offending group.
+
+If \code{x} is a \linkS4class{SingleCellExperiment},
+the assay values in the \code{\link{altExps}} are subjected to a similar summation/averaging across cells.
+This uses the same arguments that were used for the main experiment.
+Values in the \code{\link{reducedDims}} are also averaged across cells (regardless of the value of \code{average}).
+
+Users can tune the behavior of the function for these additional fields with \code{use_altexps} and \code{use_dimred}.
+Note that if the alternative experiments themselves are \linkS4class{SingleCellExperiment}s,
+any further nested alternative experiment or reduced dimensions will always be aggregated
+regardless of the value of \code{use_altexps} or \code{use_dimred}.
+
+If \code{ids} is a DataFrame, the combination of levels corresponding to each column is also reported in the column metadata.
+Otherwise, the level corresponding to each column is captured in the column names.
+}
+
 \examples{
 example_sce <- mockSCE()
 ids <- sample(LETTERS[1:5], ncol(example_sce), replace=TRUE)
 
 out <- sumCountsAcrossCells(example_sce, ids)
 head(out)
+attr(out, "ncells")
 
 batches <- sample(1:3, ncol(example_sce), replace=TRUE)
 out2 <- sumCountsAcrossCells(example_sce, 
       DataFrame(label=ids, batch=batches))
-out2
+head(out2)
+attr(out2, "ids")
 
 # Using another column metadata merge strategy.
 example_sce$stuff <- runif(ncol(example_sce))

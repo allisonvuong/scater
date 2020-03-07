@@ -1,12 +1,15 @@
-#' Sum or average counts across groups of cells
+#' Aggregate expression values across groups of cells
 #' 
-#' Sum or average expression values (by default, counts) and aggregate the colData 
-#' for each group of cells and for each feature;
+#' Sum counts or average expression values for each feature across groups of cells.
+#' Also aggregate values in the \code{\link{colData}} and other metadata within each group.
 #'
-#' @param x For \code{sumCountsAcrossCells}, a numeric matrix of counts containing features in rows and cells in columns.
-#' Alternatively, a \linkS4class{SummarizedExperiment} object containing such a count matrix.
+#' @param x For \code{sumCountsAcrossCells}, a numeric matrix of expression values (usually counts)
+#' containing features in rows and cells in columns.
+#' Alternatively, a \linkS4class{SummarizedExperiment} object containing such a matrix.
 #'
-#' For \code{aggregateAcrossCells}, a \linkS4class{SingleCellExperiment} or SummarizedExperiment containing a count matrix.
+#' For \code{aggregateAcrossCells}, a \linkS4class{SingleCellExperiment} or SummarizedExperiment 
+#' containing one or more matrices of expression values to be aggregated,
+#' possibly along with \code{\link{colData}}, \code{\link{reducedDims}} and \code{\link{altExps}} elements.
 #' @param ids A factor specifying the group to which each cell in \code{x} belongs.
 #'
 #' Alternatively, a \linkS4class{DataFrame} of such vectors or factors, in which case each unique combination of levels defines a group. 
@@ -20,9 +23,8 @@
 #' @param exprs_values A string or integer scalar specifying the assay of \code{x} containing the matrix of counts
 #' (or any other expression quantity that can be meaningfully summed).
 #' @param average Logical scalar indicating whether the average should be computed instead of the sum.
-#' @param store_number String specifying the field of the output \code{\link{colData}} 
-#' in which to store the number of cells in each group.
-#' Only used if \code{ids} is a DataFrame, and if \code{store_number=NULL}, this information is not stored.
+#' @param store_number String specifying the field of the output \code{\link{colData}} to store the number of cells in each group.
+#' If \code{NULL}, nothing is stored.
 #' @param BPPARAM A \linkS4class{BiocParallelParam} object specifying whether summation should be parallelized.
 #' @param ... For the generics, further arguments to be passed to specific methods.
 #' 
@@ -31,43 +33,76 @@
 #' For \code{aggregateAcrossCells}, further arguments to be passed to \code{sumCountsAcrossCells}.
 #' @param use_exprs_values A character or integer vector specifying the assay(s) of \code{x} containing count matrices.
 #' @param use_altexps Logical scalar indicating whether aggregation should be performed for alternative experiments in \code{x}.
-#'
-#' Alternatively, a character vector specifying the names of the alternative experiments to be aggregated.
+#' Alternatively, a character or integer vector specifying the alternative experiments to be aggregated.
+#' @param use_dimred Logical scalar indicating whether aggregation should be performed for dimensionality reduction results in \code{x}.
+#' Alternatively, a character or integer vector specifying the dimensionality reduction results to be aggregated.
 #' @param coldata_merge A named list of functions specifying how each column metadata field should be aggregated.
-#' For any unspecified field, metadata is retained for the first instance of a cell from each group in \code{ids}.
-#' If \code{NULL}, only fields with unique entries for each group will be retained.
+#' Each function should be named according to the name of the column in \code{\link{colData}} to which it applies.
+#' Alternatively, a single function can be supplied, see below for more details.
 #'
 #' @return 
-#' For \code{sumCountsAcrossCells} with a factor \code{ids}, a count matrix is returned with one column per level of \code{ids}.
-#' Each entry contains the sum of counts for all cells in a given group (column) for a given feature (row).
-#' Columns are ordered by \code{levels(ids)}.
-#'
-#' For \code{sumCountsAcrossCells} with a DataFrame \code{ids}, a SummarizedExperiment is returned containing a similar count matrix in the first assay.
-#' Each column corresponds to a unique combination of levels in \code{ids} and contains the sum of counts for all cells with that combination.
-#' The identities of the levels for each column are reported in the \code{\link{colData}}.
+#' For \code{sumCountsAcrossCells}, a SummarizedExperiment is returned with one column per level of \code{ids}.
+#' Each entry of the assay contains the sum or average across all cells in a given group (column) for a given feature (row).
+#' Columns are ordered by \code{levels(ids)} and the number of cells per level is reported in the \code{"ncells"} column metadata.
+#' For DataFrame \code{ids}, each column corresponds to a unique combination of levels (recorded in the \code{\link{colData}}).
 #'
 #' For \code{aggregateAcrossCells}, a SummarizedExperiment of the same class as \code{x} is returned,
-#' containing summed matrices generated by \code{sumCountsAcrossCell} on all assays specified by \code{use_exprs_values}.
-#' By default, column metadata is retained for the first instance of a cell from each group in \code{ids},
-#' but this behavior can be customized by supplying appropriate functions to \code{coldata_merge}.
-#' If \code{ids} is a DataFrame, the combination of levels corresponding to each column is also reported in the column metadata.
+#' containing summed/averaged matrices generated by \code{sumCountsAcrossCell} on all assays specified in \code{use_exprs_values}.
+#' Column metadata and other available metadata (e.g., reduced dimensions) are also aggregated, see below.
 #'
 #' @details
-#' This function provides a convenient method for aggregating counts across multiple columns for each feature.
-#' A typical application would be to sum counts across all cells in each cluster to obtain \dQuote{pseudo-bulk} samples for further analysis.
+#' These functions provide a convenient method for summing or averaging expression values across multiple columns for each feature.
+#' A typical application would be to sum counts across all cells in each cluster to obtain \dQuote{pseudo-bulk} samples for further analyses, e.g., differential expression analyses between conditions.
 #'
-#' The behaviour of this function is equivalent to that of \code{\link{colsum}}.
+#' The behaviour of \code{sumCountsAcrossCells} is equivalent to that of \code{\link{colsum}}.
 #' However, this function can operate on any matrix representation in \code{object};
 #' can do so in a parallelized manner for large matrices without resorting to block processing;
 #' and can natively support combinations of multiple factors in \code{ids}.
 #'
 #' Any \code{NA} values in \code{ids} are implicitly ignored and will not be considered during summation.
-#' This may be useful, e.g., to remove undesirable cells by setting their entries in \code{ids} to \code{NA}.
+#' This may be useful for removing undesirable cells by setting their entries in \code{ids} to \code{NA}.
 #' Alternatively, we can explicitly select the cells of interest with \code{subset_col}.
 #' 
 #' Setting \code{average=TRUE} will compute the average in each set rather than the sum.
 #' This is particularly useful if \code{x} contains expression values that have already been normalized in some manner,
 #' as computing the average avoids another round of normalization to account for differences in the size of each set.
+#'
+#' Note that, prior to version 1.16.0, \code{sumCountsAcrossCells} would return a raw matrix.
+#' This has now been wrapped in a \linkS4class{SummarizedExperiment} for consistency and to include per-group statistics.
+#'
+#' @section Aggregation of additional metadata:
+#' The \code{aggregateAcrossCells} sums the assay values in \code{x} using \code{sumCountsAcrossCells}
+#' while also aggregating metadata across cells in a sensible manner.
+#' This makes it useful for obtaining an aggregated \linkS4class{SummarizedExperiment} during an analysis session;
+#' in contrast, \code{sumCountsAcrossCells} is more lightweight and is better for use inside other functions.
+#' 
+#' Aggregation of the \code{\link{colData}} is controlled using functions in \code{coldata_merge}.
+#' This can either be:
+#' \itemize{
+#' \item A function that takes a subset of entries for any given column metadata field and returns a single value.
+#' This can be set to, e.g., \code{\link{sum}} or \code{\link{median}} for numeric covariates,
+#' or a function that takes the most abundant level for categorical factors.
+#' \item A named list of such functions, where each function is applied to the column metadata field after which it is named.
+#' Any field that does not have an entry in \code{coldata_merge} is \dQuote{unspecified} and handled as described below.
+#' A list element can also be set to \code{FALSE}, in which case no aggregation is performed for the corresponding field.
+#' \item \code{NULL}, in which case all fields are considered to be unspecified.
+#' \item \code{FALSE}, in which case no aggregation of column metadata is performed.
+#' }
+#' For any unspecified field, we check if all cells of a group have the same value.
+#' If so, that value is reported, otherwise a \code{NA} is reported for the offending group.
+#'
+#' If \code{x} is a \linkS4class{SingleCellExperiment},
+#' the assay values in the \code{\link{altExps}} are subjected to a similar summation/averaging across cells.
+#' This uses the same arguments that were used for the main experiment.
+#' Values in the \code{\link{reducedDims}} are also averaged across cells (regardless of the value of \code{average}).
+#'
+#' Users can tune the behavior of the function for these additional fields with \code{use_altexps} and \code{use_dimred}.
+#' Note that if the alternative experiments themselves are \linkS4class{SingleCellExperiment}s,
+#' any further nested alternative experiment or reduced dimensions will always be aggregated
+#' regardless of the value of \code{use_altexps} or \code{use_dimred}.
+#' 
+#' If \code{ids} is a DataFrame, the combination of levels corresponding to each column is also reported in the column metadata.
+#' Otherwise, the level corresponding to each column is captured in the column names.
 #'
 #' @author Aaron Lun
 #' @name sumCountsAcrossCells
@@ -81,11 +116,13 @@
 #'
 #' out <- sumCountsAcrossCells(example_sce, ids)
 #' head(out)
+#' attr(out, "ncells")
 #'
 #' batches <- sample(1:3, ncol(example_sce), replace=TRUE)
 #' out2 <- sumCountsAcrossCells(example_sce, 
 #'       DataFrame(label=ids, batch=batches))
-#' out2
+#' head(out2)
+#' attr(out2, "ids")
 #'
 #' # Using another column metadata merge strategy.
 #' example_sce$stuff <- runif(ncol(example_sce))
@@ -93,40 +130,45 @@
 #'      coldata_merge=list(stuff=sum))
 NULL
 
-#' @importFrom BiocParallel SerialParam
-.sum_counts_across_cells <- function(x, ids, subset_row=NULL, subset_col=NULL, 
-    average=FALSE, store_number="ncells", BPPARAM=SerialParam()) 
+#' @importFrom BiocParallel SerialParam 
+#' @importFrom SummarizedExperiment SummarizedExperiment
+.sum_counts_across_cells <- function(x, ids, subset_row=NULL, subset_col=NULL,
+    store_number="ncells", average=FALSE, BPPARAM=SerialParam(), raw=FALSE, modifier=NULL) 
 {
-    .sum_across_cells(x=x, ids=ids, subset_row=subset_row, subset_col=subset_col, 
-        average=average, store_number=store_number, BPPARAM=BPPARAM)
+    new.ids <- .process_ids(x, ids, subset_col)
+    sum.out <- .sum_across_cells(x, ids=new.ids, subset_row=subset_row,
+        average=average, BPPARAM=BPPARAM, modifier=modifier)
+
+    mat <- sum.out$mat 
+    mapping <- match(colnames(mat), as.character(new.ids))
+    coldata <- .create_coldata(original.ids=ids, mapping=mapping, 
+        freq=sum.out$freq, store_number=store_number)
+
+    # non-NULL coldata determines the output SE column names,
+    # so we make sure they're sync'd to something sensible.
+    if (.has_multi_ids(ids)) {
+        rownames(coldata) <- colnames(mat) <- NULL
+    } else {
+        rownames(coldata) <- colnames(mat)
+    }
+
+    output <- list(mat)
+    names(output) <- if(average) {
+        "average" 
+    } else { 
+        "sum" 
+    }
+    SummarizedExperiment(output, colData=coldata)
 }
 
-#' @importFrom BiocParallel SerialParam bplapply 
-#' @importClassesFrom S4Vectors DataFrame
-#' @importFrom methods is
-#' @importFrom SummarizedExperiment SummarizedExperiment
 #' @importFrom Matrix t 
 #' @importFrom DelayedArray getAutoBPPARAM setAutoBPPARAM
-.sum_across_cells <- function(x, ids, subset_row=NULL, subset_col=NULL, 
-    average=FALSE, store_number="ncells", BPPARAM=SerialParam(), modifier=NULL) 
-{
-    multi <- is(ids, "DataFrame")
-    if (multi) {
-        coldata <- ids
-        ids <- .df_to_factor(ids)
-    } 
-    if (ncol(x)!=length(ids)) {
-        stop("length of 'ids' and 'ncol(x)' are not equal")
-    }
-
-    if (!is.null(subset_col)) {
-        ids[!seq_along(ids) %in% .subset2index(subset_col, x, byrow=FALSE)] <- NA_integer_
-    }
+#' @importFrom BiocParallel SerialParam bplapply 
+.sum_across_cells <- function(x, ids, subset_row=NULL, average=FALSE, BPPARAM=SerialParam(), modifier=NULL) {
     lost <- is.na(ids)
-
+    subset_col <- if (any(lost)) which(!lost)
     by.core <- .splitRowsByWorkers(x, BPPARAM=BPPARAM, 
-        subset_row=subset_row,
-        subset_col=if (any(lost)) which(!lost))
+        subset_row=subset_row, subset_col=subset_col)
 
     if (!is.null(modifier)) { # used by numDetectedAcrossCells.
         by.core <- lapply(by.core, modifier)
@@ -141,23 +183,13 @@ NULL
     out <- bplapply(by.core, FUN=.colsum, group=sub.ids, BPPARAM=BPPARAM)
     out <- do.call(rbind, out)
 
+    freq <- table(sub.ids)
+    freq <- as.integer(freq[colnames(out)])
     if (average) {
-        freq <- table(sub.ids)
-        out <- t(t(out)/as.integer(freq[colnames(out)]))
+        out <- t(t(out)/freq)
     }
 
-    if (multi) {
-        cn <- as.integer(colnames(out))
-        m <- match(cn, ids)
-        out <- SummarizedExperiment(list(sum=out), colData=coldata[m,,drop=FALSE])
-        colnames(out) <- NULL
-
-        if (!is.null(store_number)) {
-            colData(out)[[store_number]] <- tabulate(ids)[cn]
-        }
-    }
-
-    out
+    list(mat=out, freq=freq)
 }
 
 #' @importFrom S4Vectors selfmatch
@@ -169,15 +201,48 @@ NULL
     x
 }
 
+#' @importFrom methods is
+.has_multi_ids <- function(ids) is(ids, "DataFrame")
+
+.process_ids <- function(x, ids, subset_col) {    
+    if (.has_multi_ids(ids)) {
+        ids <- .df_to_factor(ids)
+    } 
+    if (ncol(x)!=length(ids)) {
+        stop("length of 'ids' and 'ncol(x)' are not equal")
+    }
+    if (!is.null(subset_col)) {
+        ids[!seq_along(ids) %in% .subset2index(subset_col, x, byrow=FALSE)] <- NA_integer_
+    }
+    ids
+}
+
+#' @importFrom S4Vectors DataFrame
+.create_coldata <- function(original.ids, mapping, freq, store_number) {
+    if (.has_multi_ids(original.ids)) {
+        coldata <- original.ids[mapping,,drop=FALSE]
+    } else {
+        coldata <- DataFrame(ids=original.ids[mapping])
+    }
+    coldata[[store_number]] <- freq
+    coldata
+}
+
 #' @export
 #' @rdname sumCountsAcrossCells
-setMethod("sumCountsAcrossCells", "ANY", .sum_counts_across_cells)
+#' @importFrom BiocParallel SerialParam
+setMethod("sumCountsAcrossCells", "ANY", function(x, ids, subset_row=NULL, subset_col=NULL,
+    store_number="ncells", average=FALSE, BPPARAM=SerialParam())
+{
+    .sum_counts_across_cells(x, ids=ids, subset_row=subset_row, subset_col=subset_col,
+        store_number=store_number, average=average, BPPARAM=BPPARAM)
+})
 
 #' @export
 #' @rdname sumCountsAcrossCells
 #' @importFrom SummarizedExperiment assay
 setMethod("sumCountsAcrossCells", "SummarizedExperiment", function(x, ..., exprs_values="counts") {
-    .sum_counts_across_cells(assay(x, exprs_values), ...)
+    .sum_counts_across_cells(assay(x, exprs_values), ..., modifier=NULL)
 })
 
 ##########################
@@ -207,85 +272,112 @@ setMethod(".colsum", "DelayedMatrix", function(x, group) {
 
 #' @export
 #' @rdname sumCountsAcrossCells
-setMethod("aggregateAcrossCells", "SummarizedExperiment", function(x, ids, ..., 
-    store_number="ncells", coldata_merge=NULL, use_exprs_values="counts") 
+#' @importFrom S4Vectors DataFrame
+#' @importFrom SummarizedExperiment assay assays<- colData<- colData
+setMethod("aggregateAcrossCells", "SummarizedExperiment", function(x, ids, ..., subset_row=NULL, 
+    subset_col=NULL, store_number="ncells", coldata_merge=NULL, use_exprs_values="counts") 
 {
-    FUN <- .create_cell_aggregator(ids, use_exprs_values, coldata_merge, store_number)
-    FUN(x, ...)
+    new.ids <- .process_ids(x, ids, subset_col)
+    new.ids.char <- as.character(new.ids) # Avoid re-coercion on every call to the output function.
+
+    use_exprs_values <- .use_names_to_integer_indices(use_exprs_values, x=x, 
+        nameFUN=assayNames, msg="use_exprs_values")
+    if (length(use_exprs_values)==0L) {
+        stop("'use_exprs_values' must specify at least one assay")
+    }
+
+    collected <- list()
+    ncells <- NULL
+    for (i in seq_along(use_exprs_values)) {
+        sum.out <- .sum_across_cells(assay(x, use_exprs_values[i]), 
+            ids=new.ids, ..., subset_row=subset_row)
+        ncells <- sum.out$freq
+        collected[[i]] <- sum.out$mat
+    }
+    names(collected) <- assayNames(x)[use_exprs_values]
+
+    cn <- colnames(collected[[1]])
+    m <- match(cn, new.ids.char)
+    coldata <- .create_coldata(ids, mapping=m, freq=ncells, store_number=store_number)
+
+    # Ensure endomorphism by modifying the original object.
+    shell <- x[,m]
+    if (!is.null(subset_row)) {
+        shell <- shell[subset_row,]
+    }
+    assays(shell, withDimnames=FALSE) <- collected
+    new.cd <- .merge_DF_rows(colData(x), ids=new.ids.char, final=cn, mergeFUN=coldata_merge)
+
+    # Need row.names here to guarantee the correct number of rows when new.cd
+    # is empty; even if we remove the row names later.
+    new.cd <- do.call(DataFrame, c(new.cd, list(row.names=cn))) 
+    colData(shell) <- cbind(new.cd, coldata)
+
+    if (.has_multi_ids(ids)) {
+        colnames(shell) <- NULL
+    }
+    shell
 })
 
-#' @importClassesFrom S4Vectors DataFrame
-#' @importFrom methods is
-#' @importFrom SummarizedExperiment assays<- assayNames colData<- colData
-.create_cell_aggregator <- function(ids, use_exprs_values, coldata_merge, store_number) {
-    multi <- is(ids, "DataFrame")
-    if (multi) {
-        combos <- ids
-        ids <- .df_to_factor(ids)
-    } 
-
-    force(use_exprs_values)
-    force(coldata_merge)
-    force(store_number)
-
-    function(y, ..., subset_row=NULL) {
-        if (!is.null(subset_row)) {
-            y <- y[subset_row,]
+.use_names_to_integer_indices <- function(use, x, nameFUN, msg) {
+    if (isTRUE(use)) {
+        use <- seq_along(nameFUN(x))
+    } else if (isFALSE(use)) {
+        use <- integer(0)
+    } else if (is.character(use)) {
+        use <- match(use, nameFUN(x))
+        if (any(is.na(use))) {
+            stop(sprintf("'%s' contains invalid values", msg))
         }
-
-        collected <- list()
-        for (i in seq_along(use_exprs_values)) {
-            collected[[i]] <- sumCountsAcrossCells(y, ids=ids, ..., exprs_values=use_exprs_values[i])
+    } else {
+        if (any(use < 1L) || any(use > length(nameFUN(x)))) {
+            stop(sprintf("'%s' contains out-of-bounds indices", msg))
         }
-        names(collected) <- .choose_assay_names(x, use_exprs_values)
-
-        cn <- colnames(collected[[1]])
-        ids <- as.character(ids)
-        new.cd <- .merge_DF_rows(colData(y), ids, cn, coldata_merge)
-
-        m <- match(cn, ids) 
-        y <- y[,m]
-        assays(y) <- collected
-        colData(y) <- new.cd # implicitly resets column names.
-
-        if (multi) {
-            colData(y) <- cbind(colData(y), combos[m,,drop=FALSE])
-            colnames(y) <- NULL
-
-            if (!is.null(store_number)) {
-                colData(y)[[store_number]] <- as.integer(table(ids)[cn])
-            }
-        }
-
-        y
     }
+    use
 }
 
 #' @importFrom BiocGenerics match
-#' @importFrom S4Vectors split
-.merge_DF_rows <- function(x, ids, final, coldata_merge=NULL) {
-    final <- as.character(final)
-    ids <- as.character(ids)
-
-    collected <- x[match(final, ids),,drop=FALSE] 
-    rownames(collected) <- final
+#' @importFrom S4Vectors split 
+.merge_DF_rows <- function(x, ids, final, mapping=match(final, ids), mergeFUN=NULL) {
+    collected <- list()
+    if (isFALSE(mergeFUN)) {
+        return(collected)
+    }
 
     for (cn in colnames(x)) {
-        if (is.list(coldata_merge)) {
-            if (is.null(FUN <- coldata_merge[[cn]])) {
+        if (!is.function(mergeFUN)) {
+            FUN <- mergeFUN[[cn]]
+            if (isFALSE(FUN)) {
+                collected[[cn]] <- NULL
                 next
             }
-        } else if (is.null(coldata_merge)) {
-            FUN <- function(x) {
-                uq <- ifelse(length(unique(x))==1, unique(x), NA)
-                if (!any(is.na(uq))) uq else NULL
-            }
         } else {
-            FUN <- coldata_merge
+            FUN <- mergeFUN
         }
 
         grouped <- split(x[[cn]], ids)[final]
-        collected[[cn]] <- unlist(lapply(grouped, FUN))
+
+        if (is.null(FUN)) {
+            # Obtaining a NA of matched type.
+            FUN <- function(x) {
+                if (length(val <- unique(x))==1L) {
+                    val 
+                } else {
+                    val[1][NA]
+                }
+            }
+        }
+
+        per.group <- lapply(grouped, FUN)
+        per.group <- unname(per.group)
+        if (length(per.group)>=1L) {
+            # Using 'c' instead of unlist to accommodate Vectors.
+            collected[[cn]] <- do.call(c, per.group)
+        } else {
+            # Obtaining a column of the correct type.
+            collected[[cn]] <- FUN(x[[cn]])[0]
+        }
     }
 
     collected
@@ -294,16 +386,38 @@ setMethod("aggregateAcrossCells", "SummarizedExperiment", function(x, ids, ...,
 #' @export
 #' @rdname sumCountsAcrossCells
 #' @importFrom SingleCellExperiment altExp altExps altExp<- altExps<-
+#' reducedDimNames reducedDim<- reducedDim reducedDims<- reducedDims
 setMethod("aggregateAcrossCells", "SingleCellExperiment", function(x, ids, 
-    ..., subset_row=NULL, coldata_merge=NULL, store_number="ncells",
-    use_exprs_values="counts", use_altexps=TRUE)
+    ..., subset_row=NULL, subset_col=NULL, coldata_merge=NULL, store_number="ncells",
+    use_exprs_values="counts", use_altexps=TRUE, use_dimred=TRUE)
 {
-    FUN <- .create_cell_aggregator(ids, use_exprs_values, coldata_merge, store_number)
-    y <- FUN(x, ..., subset_row=subset_row)
-    use_altexps <- .get_altexps_to_use(x, use_altexps)
+    base.args <- list(x=x, ids=ids, ..., subset_col=subset_col, 
+        coldata_merge=coldata_merge, store_number=store_number, 
+        use_exprs_values=use_exprs_values)
+
+    y <- do.call(callNextMethod, c(base.args, list(subset_row=subset_row)))
+
+    use_altexps <- .use_names_to_integer_indices(use_altexps, x=x, nameFUN=altExpNames, msg="use_altexps")
     for (i in use_altexps) {
-        altExp(y, i) <- FUN(altExp(x, i), ...)
+        # Do NOT pass use_altexps and use_dimred, as this
+        # part must work with any SE object.
+        args <- base.args
+        args$x <- altExp(x, i)
+        altExp(y, i) <- do.call(aggregateAcrossCells, args)
     }
     altExps(y) <- altExps(y, withColData=FALSE)[use_altexps]
+
+    new.ids <- .process_ids(x, ids, subset_col)
+    use_dimred <- .use_names_to_integer_indices(use_dimred, x=x, nameFUN=reducedDimNames, msg="use_dimred")
+    for (i in use_dimred) {
+        # We re-use sumCountsAcrossCells rather than using something
+        # else like rowsum(), in order to ensure that the order of the
+        # _rows_ here is the same as that in the aggregated `y`.
+        current <- t(reducedDim(x, i))
+        out <- .sum_across_cells(current, ids=new.ids, average=TRUE)
+        reducedDim(y, i) <- t(out$mat)
+    }
+    reducedDims(y) <- reducedDims(y, withDimnames=FALSE)[use_dimred]
+
     y
 })

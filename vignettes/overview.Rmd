@@ -6,7 +6,7 @@ author:
   - EMBL European Bioinformatics Institute
 - name: Aaron Lun
   email: infinite.monkeys.with.keyboards@gmail.com
-date: "Revised: November 2, 2019"
+date: "Revised: February 4, 2020"
 package: scater
 output:
   BiocStyle::html_document:
@@ -291,6 +291,43 @@ assay(example_sce, "normed") <- normalizeCounts(example_sce,
     size_factors=runif(ncol(example_sce)), pseudo_count=1.5)
 ```
 
+## Aggregation across groups or clusters
+
+The `aggregateAcrossCells()` function is helpful for aggregating expression values across groups of cells.
+For example, we might wish to sum together counts for all cells in the same cluster,
+possibly to use as a summary statistic for downstream analyses (e.g., for differential expression with `r Biocpkg("edgeR")`).
+This will also perform the courtesy of sensibly aggregating the column metadata for downstream use.
+
+```{r}
+agg_sce <- aggregateAcrossCells(example_sce, ids=example_sce$level1class)
+head(assay(agg_sce))
+colData(agg_sce)[,c("ids", "ncells")]
+```
+
+It is similarly possible to sum across multiple factors, as shown below for the cell type and the tissue of origin.
+This yields one column per combination of cell type and tissue,
+which allows us to conveniently perform downstream analyses with both factors.
+
+```{r}
+agg_sce <- aggregateAcrossCells(example_sce, 
+    ids=colData(example_sce)[,c("level1class", "tissue")])
+head(assay(agg_sce))
+colData(agg_sce)[,c("level1class", "tissue", "ncells")]
+```
+
+Summation across rows may occasionally be useful for obtaining a measure of the activity of a gene set, e.g., in a pathway.
+Given a list of gene sets, we can use the `sumCountsAcrossFeatures()` function to aggregate expression values across features.
+This is usually best done by averaging the log-expression values as shown below.
+
+```{r}
+agg_feat <- sumCountsAcrossFeatures(example_sce,
+    ids=list(GeneSet1=1:10, GeneSet2=11:50, GeneSet3=1:100),
+    average=TRUE, exprs_values="logcounts")
+agg_feat[,1:10]
+```
+
+Similar functions are available to compute the number or proportion of cells with detectable expression in each group.
+
 ## Visualizing expression values
 
 The `plotExpression()` function makes it easy to plot expression values for a subset of genes or features.
@@ -412,6 +449,49 @@ plotPCA(example_sce, ncomponents = 4, colour_by = "level1class")
 
 We separate the execution of these functions from the plotting to enable the same coordinates to be re-used across multiple plots.
 This avoids repeatedly recomputing those coordinates just to change an aesthetic across plots.
+
+# Utilities for custom visualization
+
+We provide some helper functions to easily convert from a `SingleCellExperiment` object to a `data.frame` for use in, say, `r CRANpkg("ggplot2")` functions.
+This allows users to create highly customized plots that are not covered by the existing `r Biocpkg("scater")` functions.
+The `ggcells()` function will intelligently retrieve fields from the `colData()`, `assays()`, `altExps()` or `reducedDims()` to create a single `data.frame` for immediate use.
+In the example below, we create boxplots of _Snap25_ expression stratified by cell type and tissue of origin:
+
+```{r, fig.wide=TRUE}
+ggcells(example_sce, mapping=aes(x=level1class, y=Snap25)) + 
+    geom_boxplot() +
+    facet_wrap(~tissue)
+```
+
+Reduced dimension results are easily pulled in to create customized equivalents of the `plotReducedDim()` output.
+In this example, we create a $t$-SNE plot faceted by tissue and coloured by _Snap25_ expression:
+
+```{r}
+ggcells(example_sce, mapping=aes(x=TSNE.1, y=TSNE.2, colour=Snap25)) +
+    geom_point() +
+    stat_density_2d() +
+    facet_wrap(~tissue) +
+    scale_colour_distiller(direction=1)
+```
+
+It is also straightforward to examine the relationship between the size factors on the normalized gene expression:
+
+```{r}
+ggcells(example_sce, mapping=aes(x=sizeFactor, y=Actb)) +
+    geom_point() +
+    geom_smooth()
+```
+
+Similar operations can be performed on the features using the `ggfeatures()` function,
+which will retrieve values either from `rowData` or from the columns of the `assays`.
+Here, we examine the relationship between the feature type and the expression within a given cell;
+note the renaming of the otherwise syntactically invalid cell name.
+
+```{r}
+colnames(example_sce) <- make.names(colnames(example_sce))
+ggfeatures(example_sce, mapping=aes(x=featureType, y=X1772062111_E06)) + 
+    geom_violin()
+```
 
 # Transitioning from the `SCESet` class
 
